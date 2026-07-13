@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# AWS SAM and CloudFormation build files
+.aws-sam/
+packaged.yaml
+
+# Environment and secrets
+.env
+*.pem
+*.key
+
+# VS Code
+.vscode/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
