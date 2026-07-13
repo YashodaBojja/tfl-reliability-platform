@@ -11,6 +11,10 @@ Parameters:
       - prod
     Description: Environment name used for resource naming
 
+  AlertEmail:
+    Type: String
+    Description: Email address that receives TfL reliability alerts
+
 Resources:
 
   TfLBronzeBucket:
@@ -346,6 +350,57 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt TfLIngestionSchedule.Arn
 
+  TfLAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "tfl-reliability-alerts-${EnvironmentName}"
+      DisplayName: TfL Reliability Alerts
+
+      Tags:
+        - Key: Project
+          Value: TfL-Reliability-Platform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+  
+  TfLAlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref TfLAlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  TfLMaximumDelayAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "tfl-maximum-delay-over-15-minutes-${EnvironmentName}"
+
+      AlarmDescription: >
+        Sends an alert when the maximum predicted TfL arrival wait
+        exceeds 15 minutes.
+
+      Namespace: TfL/Reliability
+      MetricName: Maximum_Delay_Minutes
+
+      Dimensions:
+        - Name: LineId
+          Value: "244"
+
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+
+      Threshold: 15
+      ComparisonOperator: GreaterThanThreshold
+
+      TreatMissingData: notBreaching
+
+      AlarmActions:
+        - !Ref TfLAlertTopic
+
+      OKActions:
+        - !Ref TfLAlertTopic
+
 Outputs:
 
   BronzeBucketName:
@@ -371,3 +426,11 @@ Outputs:
   EventBridgeRuleArn:
     Description: ARN of the EventBridge schedule rule
     Value: !GetAtt TfLIngestionSchedule.Arn
+
+  AlertTopicArn:
+    Description: ARN of the SNS alert topic
+    Value: !Ref TfLAlertTopic
+
+  MaximumDelayAlarmName:
+    Description: Name of the maximum delay CloudWatch alarm
+    Value: !Ref TfLMaximumDelayAlarm
