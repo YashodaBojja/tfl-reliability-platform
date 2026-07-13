@@ -95,7 +95,7 @@ Resources:
       Handler: index.lambda_handler
       Role: !GetAtt TfLLambdaExecutionRole.Arn
       Timeout: 30
-      MemorySize: 129
+      MemorySize: 128
 
       Environment:
         Variables:
