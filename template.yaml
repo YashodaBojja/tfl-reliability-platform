@@ -401,6 +401,154 @@ Resources:
       OKActions:
         - !Ref TfLAlertTopic
 
+  TfLReliabilityDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "tfl-reliability-dashboard-${EnvironmentName}"
+
+      DashboardBody: !Sub |
+        {
+          "start": "-PT3H",
+          "periodOverride": "inherit",
+          "widgets": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 2,
+              "properties": {
+                "markdown": "# TfL Real-Time Reliability Dashboard\nMonitoring TfL line 244 ingestion, arrival predictions and operational health."
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 2,
+              "width": 16,
+              "height": 7,
+              "properties": {
+                "view": "timeSeries",
+                "title": "Average Vehicle Delay Trend - Last 3 Hours",
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Average",
+                "yAxis": {
+                  "left": {
+                    "label": "Minutes",
+                    "min": 0
+                  }
+                },
+                "metrics": [
+                  [
+                    "TfL/Reliability",
+                    "Delay_Minutes",
+                    "LineId",
+                    "244",
+                    {
+                      "label": "Average delay"
+                    }
+                  ]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 2,
+              "width": 8,
+              "height": 7,
+              "properties": {
+                "view": "singleValue",
+                "title": "Current API Success",
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Average",
+                "sparkline": true,
+                "metrics": [
+                  [
+                    "TfL/Reliability",
+                    "API_Success",
+                    "LineId",
+                    "244",
+                    {
+                      "label": "API success: 1 = healthy"
+                    }
+                  ]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 9,
+              "width": 12,
+              "height": 7,
+              "properties": {
+                "view": "bar",
+                "title": "Arrivals Tracked",
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Average",
+                "setPeriodToTimeRange": false,
+                "metrics": [
+                  [
+                    "TfL/Reliability",
+                    "Arrival_Count",
+                    "LineId",
+                    "244",
+                    {
+                      "label": "Line 244 arrivals"
+                    }
+                  ]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 9,
+              "width": 6,
+              "height": 7,
+              "properties": {
+                "view": "singleValue",
+                "title": "Maximum Delay",
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Maximum",
+                "sparkline": true,
+                "metrics": [
+                  [
+                    "TfL/Reliability",
+                    "Maximum_Delay_Minutes",
+                    "LineId",
+                    "244",
+                    {
+                      "label": "Maximum delay (minutes)"
+                    }
+                  ]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 18,
+              "y": 9,
+              "width": 6,
+              "height": 7,
+              "properties": {
+                "view": "timeSeries",
+                "title": "Maximum Delay Alarm",
+                "region": "${AWS::Region}",
+                "annotations": {
+                  "alarms": [
+                    "${TfLMaximumDelayAlarm.Arn}"
+                  ]
+                }
+              }
+            }
+          ]
+        }
 Outputs:
 
   BronzeBucketName:
@@ -434,3 +582,7 @@ Outputs:
   MaximumDelayAlarmName:
     Description: Name of the maximum delay CloudWatch alarm
     Value: !Ref TfLMaximumDelayAlarm
+  
+  DashboardName:
+    Description: Name of the CloudWatch reliability dashboard
+    Value: !Ref TfLReliabilityDashboard
