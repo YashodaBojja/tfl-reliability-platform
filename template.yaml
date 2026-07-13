@@ -65,6 +65,18 @@ Resources:
                   - !GetAtt TfLBronzeBucket.Arn
                   - !Sub "${TfLBronzeBucket.Arn}/*"
 
+        - PolicyName: TfLCloudWatchMetricsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: TfL/Reliability
+
       Tags:
         - Key: Project
           Value: TfL-Reliability-Platform
@@ -75,15 +87,10 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "tfl-ingestion-${EnvironmentName}"
-
       Runtime: python3.12
-
       Handler: index.lambda_handler
-
       Role: !GetAtt TfLLambdaExecutionRole.Arn
-
       Timeout: 30
-
       MemorySize: 128
 
       Environment:
@@ -106,6 +113,7 @@ Resources:
           logger.setLevel(logging.INFO)
 
           s3_client = boto3.client("s3")
+          cloudwatch_client = boto3.client("cloudwatch")
 
           def fetch_tfl_arrivals(line_id):
               api_url = f"https://api.tfl.gov.uk/Line/{line_id}/Arrivals"
@@ -124,7 +132,6 @@ Resources:
               ) as response:
                   status_code = response.getcode()
                   response_body = response.read().decode("utf-8")
-
                   return json.loads(response_body), status_code
 
           def save_to_s3(
@@ -154,6 +161,103 @@ Resources:
 
               return object_key
 
+          def publish_metrics(
+              line_id,
+              arrival_data,
+              api_success
+          ):
+              valid_wait_times = []
+
+              for arrival in arrival_data:
+                  time_to_station = arrival.get("timeToStation")
+
+                  if isinstance(time_to_station, (int, float)):
+                      wait_minutes = time_to_station / 60
+                      valid_wait_times.append(wait_minutes)
+
+              metric_data = [
+                  {
+                      "MetricName": "API_Success",
+                      "Dimensions": [
+                          {
+                              "Name": "LineId",
+                              "Value": line_id
+                          }
+                      ],
+                      "Value": api_success,
+                      "Unit": "Count"
+                  },
+                  {
+                      "MetricName": "Arrival_Count",
+                      "Dimensions": [
+                          {
+                              "Name": "LineId",
+                              "Value": line_id
+                          }
+                      ],
+                      "Value": len(arrival_data),
+                      "Unit": "Count"
+                  }
+              ]
+
+              if valid_wait_times:
+                  average_wait_minutes = (
+                      sum(valid_wait_times)
+                      / len(valid_wait_times)
+                  )
+                  maximum_wait_minutes = max(valid_wait_times)
+
+                  metric_data.append(
+                      {
+                          "MetricName": "Delay_Minutes",
+                          "Dimensions": [
+                              {
+                                  "Name": "LineId",
+                                  "Value": line_id
+                              }
+                          ],
+                          "Value": average_wait_minutes,
+                          "Unit": "None"
+                      }
+                  )
+
+                  metric_data.append(
+                      {
+                          "MetricName": "Maximum_Delay_Minutes",
+                          "Dimensions": [
+                              {
+                                  "Name": "LineId",
+                                  "Value": line_id
+                              }
+                          ],
+                          "Value": maximum_wait_minutes,
+                          "Unit": "None"
+                      }
+                  )
+
+              cloudwatch_client.put_metric_data(
+                  Namespace="TfL/Reliability",
+                  MetricData=metric_data
+              )
+
+          def publish_failure_metric(line_id):
+              cloudwatch_client.put_metric_data(
+                  Namespace="TfL/Reliability",
+                  MetricData=[
+                      {
+                          "MetricName": "API_Success",
+                          "Dimensions": [
+                              {
+                                  "Name": "LineId",
+                                  "Value": line_id
+                              }
+                          ],
+                          "Value": 0,
+                          "Unit": "Count"
+                      }
+                  ]
+              )
+
           def lambda_handler(event, context):
               bucket_name = os.environ["BRONZE_BUCKET_NAME"]
               line_id = os.environ.get("TFL_LINE_ID", "244")
@@ -175,6 +279,12 @@ Resources:
                       status_code
                   )
 
+                  publish_metrics(
+                      line_id,
+                      arrival_data,
+                      1
+                  )
+
                   logger.info(
                       "Stored %s records in s3://%s/%s",
                       len(arrival_data),
@@ -185,8 +295,7 @@ Resources:
                   return {
                       "statusCode": 200,
                       "body": json.dumps({
-                          "message":
-                              "TfL arrival data stored successfully",
+                          "message": "TfL arrival data stored successfully",
                           "line_id": line_id,
                           "records_received": len(arrival_data),
                           "bucket": bucket_name,
@@ -196,6 +305,13 @@ Resources:
 
               except Exception as error:
                   logger.exception("TfL ingestion failed")
+
+                  try:
+                      publish_failure_metric(line_id)
+                  except Exception:
+                      logger.exception(
+                          "Failed to publish failure metric"
+                      )
 
                   return {
                       "statusCode": 500,
@@ -210,6 +326,7 @@ Resources:
           Value: TfL-Reliability-Platform
         - Key: Environment
           Value: !Ref EnvironmentName
+
   TfLIngestionSchedule:
     Type: AWS::Events::Rule
     Properties:
@@ -217,7 +334,6 @@ Resources:
       Description: Triggers the TfL ingestion Lambda every 5 minutes
       ScheduleExpression: rate(5 minutes)
       State: ENABLED
-
       Targets:
         - Arn: !GetAtt TfLIngestionLambda.Arn
           Id: TfLIngestionLambdaTarget
@@ -247,7 +363,7 @@ Outputs:
   LambdaRoleArn:
     Description: ARN of the Lambda execution role
     Value: !GetAtt TfLLambdaExecutionRole.Arn
-  
+
   EventBridgeRuleName:
     Description: Name of the EventBridge schedule rule
     Value: !Ref TfLIngestionSchedule
