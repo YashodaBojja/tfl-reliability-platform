@@ -5,8 +5,11 @@ on:
     branches:
       - main
 
+  workflow_dispatch:
+
 jobs:
   deploy:
+    name: Validate and deploy
     runs-on: ubuntu-latest
 
     permissions:
@@ -23,6 +26,9 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: eu-west-2
 
+      - name: Confirm AWS identity
+        run: aws sts get-caller-identity
+
       - name: Validate CloudFormation template
         run: |
           aws cloudformation validate-template \
@@ -37,4 +43,13 @@ jobs:
               EnvironmentName=dev \
               AlertEmail="${{ secrets.ALERT_EMAIL }}" \
             --capabilities CAPABILITY_NAMED_IAM \
-            --region eu-west-2
+            --region eu-west-2 \
+            --no-fail-on-empty-changeset
+
+      - name: Display stack outputs
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name tfl-reliability-platform-dev \
+            --region eu-west-2 \
+            --query "Stacks[0].Outputs" \
+            --output table
