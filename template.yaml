@@ -210,6 +210,25 @@ Resources:
           Value: TfL-Reliability-Platform
         - Key: Environment
           Value: !Ref EnvironmentName
+  TfLIngestionSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "tfl-ingestion-schedule-${EnvironmentName}"
+      Description: Triggers the TfL ingestion Lambda every 5 minutes
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+
+      Targets:
+        - Arn: !GetAtt TfLIngestionLambda.Arn
+          Id: TfLIngestionLambdaTarget
+
+  TfLPermissionForEventBridge:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TfLIngestionLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TfLIngestionSchedule.Arn
 
 Outputs:
 
@@ -228,3 +247,11 @@ Outputs:
   LambdaRoleArn:
     Description: ARN of the Lambda execution role
     Value: !GetAtt TfLLambdaExecutionRole.Arn
+  
+  EventBridgeRuleName:
+    Description: Name of the EventBridge schedule rule
+    Value: !Ref TfLIngestionSchedule
+
+  EventBridgeRuleArn:
+    Description: ARN of the EventBridge schedule rule
+    Value: !GetAtt TfLIngestionSchedule.Arn
