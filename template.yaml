@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: TfL Real-Time Reliability Platform - Phase 1 Infrastructure
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - test
+      - prod
+    Description: Environment name used for resource naming
+
+Resources:
+
+  TfLBronzeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "tfl-bronze-${AWS::AccountId}-${AWS::Region}-${EnvironmentName}"
+
+      VersioningConfiguration:
+        Status: Enabled
+
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+      Tags:
+        - Key: Project
+          Value: TfL-Reliability-Platform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  TfLLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "tfl-lambda-role-${EnvironmentName}"
+
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+      Policies:
+        - PolicyName: TfLS3WritePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt TfLBronzeBucket.Arn
+                  - !Sub "${TfLBronzeBucket.Arn}/*"
+
+      Tags:
+        - Key: Project
+          Value: TfL-Reliability-Platform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  TfLIngestionLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "tfl-ingestion-${EnvironmentName}"
+
+      Runtime: python3.12
+
+      Handler: index.lambda_handler
+
+      Role: !GetAtt TfLLambdaExecutionRole.Arn
+
+      Timeout: 30
+
+      MemorySize: 128
+
+      Environment:
+        Variables:
+          BRONZE_BUCKET_NAME: !Ref TfLBronzeBucket
+          TFL_LINE_ID: "244"
+
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+          from datetime import datetime, timezone
+
+          s3_client = boto3.client("s3")
+
+          def lambda_handler(event, context):
+              bucket_name = os.environ["BRONZE_BUCKET_NAME"]
+
+              test_data = {
+                  "message": "TfL ingestion Lambda deployed successfully",
+                  "line_id": os.environ.get("TFL_LINE_ID", "244"),
+                  "timestamp": datetime.now(timezone.utc).isoformat()
+              }
+
+              timestamp = datetime.now(timezone.utc).strftime("%Y/%m/%d/%H/%M/%S")
+              object_key = f"raw/test/{timestamp}.json"
+
+              s3_client.put_object(
+                  Bucket=bucket_name,
+                  Key=object_key,
+                  Body=json.dumps(test_data),
+                  ContentType="application/json"
+              )
+
+              return {
+                  "statusCode": 200,
+                  "body": json.dumps({
+                      "message": "Test data saved successfully",
+                      "bucket": bucket_name,
+                      "object_key": object_key
+                  })
+              }
+
+      Tags:
+        - Key: Project
+          Value: TfL-Reliability-Platform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+Outputs:
+
+  BronzeBucketName:
+    Description: Name of the S3 Bronze bucket
+    Value: !Ref TfLBronzeBucket
+
+  BronzeBucketArn:
+    Description: ARN of the S3 Bronze bucket
+    Value: !GetAtt TfLBronzeBucket.Arn
+
+  LambdaFunctionName:
+    Description: Name of the TfL ingestion Lambda function
+    Value: !Ref TfLIngestionLambda
+
+  LambdaRoleArn:
+    Description: ARN of the Lambda execution role
+    Value: !GetAtt TfLLambdaExecutionRole.Arn
