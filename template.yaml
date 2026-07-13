@@ -330,6 +330,8 @@ Resources:
           Value: TfL-Reliability-Platform
         - Key: Environment
           Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
 
   TfLIngestionSchedule:
     Type: AWS::Events::Rule
